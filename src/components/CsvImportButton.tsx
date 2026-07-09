@@ -5,7 +5,7 @@ import { parseDriveLogCsv } from '../utils/csv'
 import type { DriveLogEntry } from '../types'
 
 interface Props {
-  onImported: (entries: DriveLogEntry[], warnings: string[]) => void
+  onImported: (entries: DriveLogEntry[], baselineOdo: number, warnings: string[]) => void
 }
 
 export default function CsvImportButton({ onImported }: Props) {
@@ -13,8 +13,8 @@ export default function CsvImportButton({ onImported }: Props) {
 
   const handleFile = async (file: File) => {
     const text = await file.text()
-    const { entries, warnings } = parseDriveLogCsv(text)
-    onImported(entries, warnings)
+    const { entries, baselineOdo, warnings } = parseDriveLogCsv(text)
+    onImported(entries, baselineOdo, warnings)
   }
 
   return (

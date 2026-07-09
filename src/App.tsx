@@ -15,53 +15,90 @@ import DownloadIcon from '@mui/icons-material/DownloadOutlined'
 import DriveLogTable from './components/DriveLogTable'
 import SummaryStats from './components/SummaryStats'
 import CsvImportButton from './components/CsvImportButton'
-import EntryDialog from './components/EntryDialog'
-import type { DriveLogEntry } from './types'
-import { validateChain, suggestNextStartOdo } from './utils/validation'
+import EntryDialog, { type EntrySavePayload } from './components/EntryDialog'
+import type { ComputedEntry, DriveLogEntry } from './types'
+import { computeChain, validateEntries } from './utils/chain'
 import { exportDriveLogCsv, downloadCsv, makeId } from './utils/csv'
-import { loadEntries, saveEntries } from './utils/storage'
+import { loadLog, saveLog } from './utils/storage'
+
+/** Which entry the dialog is currently open for: inserting a brand new
+ *  row at a given position, or editing an existing one by id. */
+type DialogState = { mode: 'add'; index: number } | { mode: 'edit'; id: string } | null
 
 export default function App() {
-  const [entries, setEntries] = useState<DriveLogEntry[]>(() => loadEntries())
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [editingEntry, setEditingEntry] = useState<DriveLogEntry | undefined>(undefined)
+  const initialLog = useMemo(() => loadLog(), [])
+  const [baselineOdo, setBaselineOdo] = useState<number>(initialLog.baselineOdo)
+  const [entries, setEntries] = useState<DriveLogEntry[]>(initialLog.entries)
+  const [dialogState, setDialogState] = useState<DialogState>(null)
   const [snackbar, setSnackbar] = useState<{ message: string; severity: 'success' | 'warning' | 'error' } | null>(
     null,
   )
 
   useEffect(() => {
-    saveEntries(entries)
-  }, [entries])
+    saveLog({ baselineOdo, entries })
+  }, [baselineOdo, entries])
 
-  const issues = useMemo(() => validateChain(entries), [entries])
+  // The single place Start ODO / Stop ODO get derived. Everything below
+  // — the table, the summary, validation, the dialog's starting point —
+  // reads from this instead of trusting any stored odometer value.
+  const computed = useMemo(() => computeChain(baselineOdo, entries), [baselineOdo, entries])
+  const issues = useMemo(() => validateEntries(computed), [computed])
   const errorCount = useMemo(
     () => Array.from(issues.values()).flat().filter((i) => i.severity === 'error').length,
     [issues],
   )
 
-  const handleAddClick = () => {
-    setEditingEntry(undefined)
-    setDialogOpen(true)
-  }
-
-  const handleEditClick = (entry: DriveLogEntry) => {
-    setEditingEntry(entry)
-    setDialogOpen(true)
-  }
-
-  const handleSave = (entry: DriveLogEntry) => {
-    setEntries((prev) => {
-      const exists = prev.some((e) => e.id === entry.id)
-      return exists ? prev.map((e) => (e.id === entry.id ? entry : e)) : [...prev, entry]
-    })
-  }
+  const handleAppend = () => setDialogState({ mode: 'add', index: entries.length })
+  const handleInsertAt = (index: number) => setDialogState({ mode: 'add', index })
+  const handleEditClick = (entry: ComputedEntry) => setDialogState({ mode: 'edit', id: entry.id })
+  const handleDialogClose = () => setDialogState(null)
 
   const handleDelete = (id: string) => {
     setEntries((prev) => prev.filter((e) => e.id !== id))
   }
 
-  const handleImported = (imported: DriveLogEntry[], warnings: string[]) => {
-    setEntries((prev) => [...prev, ...imported])
+  const handleSave = (payload: EntrySavePayload) => {
+    if (!dialogState) return
+    if (dialogState.mode === 'add') {
+      const newEntry: DriveLogEntry = {
+        id: makeId(),
+        date: payload.date,
+        distance: payload.distance,
+        reason: payload.reason,
+      }
+      setEntries((prev) => [
+        ...prev.slice(0, dialogState.index),
+        newEntry,
+        ...prev.slice(dialogState.index),
+      ])
+      if (dialogState.index === 0 && payload.startOdoOverride !== undefined) {
+        setBaselineOdo(payload.startOdoOverride)
+      }
+    } else {
+      setEntries((prev) =>
+        prev.map((e) =>
+          e.id === dialogState.id
+            ? { ...e, date: payload.date, distance: payload.distance, reason: payload.reason }
+            : e,
+        ),
+      )
+      const idx = entries.findIndex((e) => e.id === dialogState.id)
+      if (idx === 0 && payload.startOdoOverride !== undefined) {
+        setBaselineOdo(payload.startOdoOverride)
+      }
+    }
+  }
+
+  const handleImported = (imported: DriveLogEntry[], importedBaseline: number, warnings: string[]) => {
+    if (entries.length === 0) {
+      setBaselineOdo(importedBaseline)
+      setEntries(imported)
+    } else {
+      // Log already has rows: the imported trips are appended, and the
+      // chain simply continues from the current last Stop ODO — the
+      // CSV's own baseline is only meaningful for an empty log.
+      setEntries((prev) => [...prev, ...imported])
+    }
     if (warnings.length > 0) {
       setSnackbar({
         message: `Importerade ${imported.length} resor med ${warnings.length} varning(ar): ${warnings[0]}${
@@ -75,8 +112,27 @@ export default function App() {
   }
 
   const handleExport = () => {
-    const csv = exportDriveLogCsv(entries)
+    const csv = exportDriveLogCsv({ baselineOdo, entries })
     downloadCsv(`korjournal-${new Date().toISOString().slice(0, 10)}.csv`, csv)
+  }
+
+  // Figure out what the dialog should show: the Start ODO this row has
+  // (or will have), whether it's editable (only true for position 0),
+  // and the existing entry data when editing.
+  let dialogStartOdo = 0
+  let dialogIsFirst = false
+  let dialogInitial: DriveLogEntry | undefined
+
+  if (dialogState?.mode === 'add') {
+    dialogIsFirst = dialogState.index === 0
+    dialogStartOdo = dialogState.index === 0 ? baselineOdo : computed[dialogState.index - 1].stopOdo
+  } else if (dialogState?.mode === 'edit') {
+    const idx = computed.findIndex((e) => e.id === dialogState.id)
+    if (idx >= 0) {
+      dialogIsFirst = idx === 0
+      dialogStartOdo = computed[idx].startOdo
+      dialogInitial = entries[idx]
+    }
   }
 
   return (
@@ -96,34 +152,41 @@ export default function App() {
       <Container maxWidth="lg" sx={{ py: 4 }}>
         <Stack spacing={3}>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ sm: 'center' }}>
-            <Typography variant="body2" color="text.secondary" maxWidth={520}>
-              Registrera varje tjänsteresa med datum, mätarställning och anledning. Start ODO för en
-              resa måste stämma med föregående resas Stop ODO.
+            <Typography variant="body2" color="text.secondary" maxWidth={560}>
+              Registrera varje tjänsteresa med datum, mätarställning och anledning. Start ODO
+              härleds alltid från föregående resas Stop ODO — infoga en resa var som helst i
+              listan så flyttas alla senare resor automatiskt, utan att deras distanser ändras.
             </Typography>
             <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
               <CsvImportButton onImported={handleImported} />
               <Button variant="outlined" color="inherit" startIcon={<DownloadIcon />} onClick={handleExport} disabled={entries.length === 0}>
                 Exportera CSV
               </Button>
-              <Button variant="contained" startIcon={<AddIcon />} onClick={handleAddClick}>
+              <Button variant="contained" startIcon={<AddIcon />} onClick={handleAppend}>
                 Lägg till resa
               </Button>
             </Stack>
           </Stack>
 
-          <SummaryStats entries={entries} errorCount={errorCount} />
+          <SummaryStats entries={computed} errorCount={errorCount} />
 
-          <DriveLogTable entries={entries} issues={issues} onEdit={handleEditClick} onDelete={handleDelete} />
+          <DriveLogTable
+            entries={computed}
+            issues={issues}
+            onEdit={handleEditClick}
+            onDelete={handleDelete}
+            onInsertAt={handleInsertAt}
+          />
         </Stack>
       </Container>
 
       <EntryDialog
-        open={dialogOpen}
-        onClose={() => setDialogOpen(false)}
+        open={dialogState !== null}
+        onClose={handleDialogClose}
         onSave={handleSave}
-        initial={editingEntry}
-        expectedStartOdo={suggestNextStartOdo(entries)}
-        makeId={makeId}
+        initial={dialogInitial}
+        startOdo={dialogStartOdo}
+        isFirst={dialogIsFirst}
       />
 
       <Snackbar

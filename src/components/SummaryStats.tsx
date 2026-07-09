@@ -2,10 +2,10 @@ import Paper from '@mui/material/Paper'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import Divider from '@mui/material/Divider'
-import type { DriveLogEntry } from '../types'
+import type { ComputedEntry } from '../types'
 
 interface Props {
-  entries: DriveLogEntry[]
+  entries: ComputedEntry[]
   errorCount: number
 }
 

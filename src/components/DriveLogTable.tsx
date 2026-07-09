@@ -12,16 +12,18 @@ import Chip from '@mui/material/Chip'
 import Typography from '@mui/material/Typography'
 import EditIcon from '@mui/icons-material/EditOutlined'
 import DeleteIcon from '@mui/icons-material/DeleteOutline'
+import PlaylistAddIcon from '@mui/icons-material/PlaylistAddOutlined'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import WarningAmberIcon from '@mui/icons-material/WarningAmberOutlined'
-import type { DriveLogEntry, EntryIssue } from '../types'
-import { sortEntries } from '../utils/validation'
+import type { ComputedEntry, EntryIssue } from '../types'
 
 interface Props {
-  entries: DriveLogEntry[]
+  entries: ComputedEntry[]
   issues: Map<string, EntryIssue[]>
-  onEdit: (entry: DriveLogEntry) => void
+  onEdit: (entry: ComputedEntry) => void
   onDelete: (id: string) => void
+  /** Insert a new, blank row above the row currently at `index`. */
+  onInsertAt: (index: number) => void
 }
 
 function formatDate(iso: string): string {
@@ -30,10 +32,8 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString('sv-SE')
 }
 
-export default function DriveLogTable({ entries, issues, onEdit, onDelete }: Props) {
-  const sorted = sortEntries(entries)
-
-  if (sorted.length === 0) {
+export default function DriveLogTable({ entries, issues, onEdit, onDelete, onInsertAt }: Props) {
+  if (entries.length === 0) {
     return (
       <Paper variant="outlined" sx={{ p: 6, textAlign: 'center' }}>
         <Typography color="text.secondary">
@@ -58,7 +58,7 @@ export default function DriveLogTable({ entries, issues, onEdit, onDelete }: Pro
           </TableRow>
         </TableHead>
         <TableBody>
-          {sorted.map((entry) => {
+          {entries.map((entry, index) => {
             const entryIssues = issues.get(entry.id) ?? []
             const hasError = entryIssues.some((i) => i.severity === 'error')
             const hasWarning = entryIssues.some((i) => i.severity === 'warning')
@@ -100,6 +100,11 @@ export default function DriveLogTable({ entries, issues, onEdit, onDelete }: Pro
                   )}
                 </TableCell>
                 <TableCell align="right">
+                  <Tooltip title="Infoga resa ovanför">
+                    <IconButton size="small" onClick={() => onInsertAt(index)} aria-label="Infoga resa ovanför">
+                      <PlaylistAddIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
                   <IconButton size="small" onClick={() => onEdit(entry)} aria-label="Redigera">
                     <EditIcon fontSize="small" />
                   </IconButton>

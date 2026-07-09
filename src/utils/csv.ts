@@ -1,5 +1,6 @@
 import Papa from 'papaparse'
-import type { DriveLogEntry } from '../types'
+import type { ComputedEntry, DriveLog, DriveLogEntry } from '../types'
+import { computeChain } from './chain'
 
 let idCounter = 0
 /** Generates a reasonably unique id without pulling in a uuid dependency. */
@@ -9,6 +10,10 @@ export function makeId(): string {
 }
 
 export interface CsvImportResult {
+  /** Start ODO of the first imported row — only meaningful if importing
+   *  into an empty log; ignored otherwise (the import just continues the
+   *  existing chain). */
+  baselineOdo: number
   entries: DriveLogEntry[]
   warnings: string[]
 }
@@ -25,7 +30,6 @@ function parseNumber(raw: string, field: string, rowNum: number, warnings: strin
 
 function parseDate(raw: string, rowNum: number, warnings: string[]): string {
   const trimmed = raw.trim()
-  // Accept yyyy-mm-dd directly; otherwise try to coerce via Date, else keep raw.
   if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed
   const asDate = new Date(trimmed)
   if (!Number.isNaN(asDate.getTime())) {
@@ -36,9 +40,15 @@ function parseDate(raw: string, rowNum: number, warnings: string[]): string {
 }
 
 /**
- * Parses a CSV string with columns: Date, Start ODO, Distance, Stop ODO, Reason.
- * Distance is recomputed from Start/Stop ODO rather than trusted verbatim,
- * and a warning is added if the file's own Distance column disagrees.
+ * Parses a CSV with columns: Date, Start ODO, Distance, Stop ODO, Reason.
+ *
+ * Each row's own distance is recomputed as Stop ODO - Start ODO (the file's
+ * Distance column is only used to sanity-check, with a warning on
+ * mismatch). The file's Start ODO column is otherwise only trusted for row
+ * 1, which becomes the log's baseline — from row 2 onward, Start ODO is
+ * expected to equal the previous row's Stop ODO, and a warning is raised
+ * if it doesn't (that row's own distance is still kept correct; only the
+ * *gap* between rows is being flagged, not silently trusted).
  */
 export function parseDriveLogCsv(csvText: string): CsvImportResult {
   const warnings: string[] = []
@@ -54,6 +64,7 @@ export function parseDriveLogCsv(csvText: string): CsvImportResult {
     }
   }
 
+  let previousRawStop: number | null = null
   const entries: DriveLogEntry[] = result.data.map((row, idx) => {
     const rowNum = idx + 2 // account for header row, 1-indexed
     const date = parseDate(row['Date'] ?? '', rowNum, warnings)
@@ -70,23 +81,34 @@ export function parseDriveLogCsv(csvText: string): CsvImportResult {
         `Rad ${rowNum}: angiven Distance (${declaredDistance}) matchar inte Stop ODO - Start ODO (${distance}). Beräknat värde används.`,
       )
     }
+    if (previousRawStop !== null && startOdo !== previousRawStop) {
+      warnings.push(
+        `Rad ${rowNum}: Start ODO (${startOdo}) matchade inte föregående rads Stop ODO (${previousRawStop}) i filen. Resans egen distans (${distance} km) importerades ändå; kedjan byggs om automatiskt.`,
+      )
+    }
+    previousRawStop = stopOdo
 
     return {
       id: makeId(),
       date,
-      startOdo,
-      stopOdo,
       distance,
       reason: (row['Reason'] ?? '').trim(),
     }
   })
 
-  return { entries, warnings }
+  const baselineOdo =
+    result.data.length > 0
+      ? parseNumber(result.data[0]['Start ODO'] ?? '0', 'Start ODO', 2, [])
+      : 0
+
+  return { baselineOdo, entries, warnings }
 }
 
-/** Serializes entries back into the required CSV shape. */
-export function exportDriveLogCsv(entries: DriveLogEntry[]): string {
-  const rows = entries.map((e) => ({
+/** Serializes the log back into the required CSV shape, deriving
+ *  Start ODO / Stop ODO from the baseline + each row's distance. */
+export function exportDriveLogCsv(log: DriveLog): string {
+  const computed: ComputedEntry[] = computeChain(log.baselineOdo, log.entries)
+  const rows = computed.map((e) => ({
     Date: e.date,
     'Start ODO': e.startOdo,
     Distance: e.distance,
