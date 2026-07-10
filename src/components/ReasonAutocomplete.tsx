@@ -1,21 +1,25 @@
 import Autocomplete from '@mui/material/Autocomplete'
 import TextField from '@mui/material/TextField'
-import { COMMON_REASONS } from '../types'
 
 interface Props {
   value: string
   onChange: (value: string) => void
+  /** Reasons to offer in the dropdown — typically everything already
+   *  used in the log plus a small seed list, so it grows on its own as
+   *  people log new kinds of trips. */
+  options: string[]
   error?: boolean
   helperText?: string
 }
 
-/** Free-solo autocomplete: offers common Skatteverket-style trip reasons,
- *  but the user can type anything they like. */
-export default function ReasonAutocomplete({ value, onChange, error, helperText }: Props) {
+/** Free-solo autocomplete: offers reasons already used elsewhere in the
+ *  log (plus a small built-in seed list), but the user can always type
+ *  something new. */
+export default function ReasonAutocomplete({ value, onChange, options, error, helperText }: Props) {
   return (
     <Autocomplete
       freeSolo
-      options={COMMON_REASONS}
+      options={options}
       value={value}
       inputValue={value}
       onInputChange={(_e, newValue) => onChange(newValue)}

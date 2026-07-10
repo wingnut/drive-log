@@ -6,7 +6,6 @@ import type { ComputedEntry } from '../types'
 
 interface Props {
   entries: ComputedEntry[]
-  errorCount: number
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -22,7 +21,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   )
 }
 
-export default function SummaryStats({ entries, errorCount }: Props) {
+export default function SummaryStats({ entries }: Props) {
   const totalDistance = entries.reduce((sum, e) => sum + e.distance, 0)
   const tripCount = entries.length
   const firstOdo = entries.length ? Math.min(...entries.map((e) => e.startOdo)) : 0
@@ -34,10 +33,6 @@ export default function SummaryStats({ entries, errorCount }: Props) {
         <Stat label="Antal resor" value={String(tripCount)} />
         <Stat label="Total körsträcka" value={`${totalDistance.toLocaleString('sv-SE')} km`} />
         <Stat label="Mätarställning, intervall" value={tripCount ? `${firstOdo.toLocaleString('sv-SE')} – ${lastOdo.toLocaleString('sv-SE')} km` : '—'} />
-        <Stat
-          label="Valideringsfel"
-          value={String(errorCount)}
-        />
       </Stack>
     </Paper>
   )

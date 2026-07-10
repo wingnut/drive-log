@@ -1,5 +1,6 @@
 import { useRef } from 'react'
 import Button from '@mui/material/Button'
+import Tooltip from '@mui/material/Tooltip'
 import UploadFileIcon from '@mui/icons-material/UploadFileOutlined'
 import { parseDriveLogCsv } from '../utils/csv'
 import type { DriveLogEntry } from '../types'
@@ -7,6 +8,11 @@ import type { DriveLogEntry } from '../types'
 interface Props {
   onImported: (entries: DriveLogEntry[], baselineOdo: number, warnings: string[]) => void
 }
+
+const MERGE_BEHAVIOR_EXPLANATION =
+  'Importerade resor läggs inte bara på i slutet — de vävs in bland befintliga resor efter datum. ' +
+  'Delar en importerad resa datum med en befintlig hamnar den under den befintliga. Loggens nuvarande ' +
+  'startvärde (baseline-ODO) behålls; filens eget startvärde används bara om loggen är helt tom.'
 
 export default function CsvImportButton({ onImported }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
@@ -19,14 +25,16 @@ export default function CsvImportButton({ onImported }: Props) {
 
   return (
     <>
-      <Button
-        variant="outlined"
-        color="inherit"
-        startIcon={<UploadFileIcon />}
-        onClick={() => inputRef.current?.click()}
-      >
-        Importera CSV
-      </Button>
+      <Tooltip title={MERGE_BEHAVIOR_EXPLANATION} placement="bottom" arrow>
+        <Button
+          variant="outlined"
+          color="inherit"
+          startIcon={<UploadFileIcon />}
+          onClick={() => inputRef.current?.click()}
+        >
+          Importera CSV
+        </Button>
+      </Tooltip>
       <input
         ref={inputRef}
         type="file"

@@ -104,6 +104,39 @@ export function parseDriveLogCsv(csvText: string): CsvImportResult {
   return { baselineOdo, entries, warnings }
 }
 
+/**
+ * Finds where a date belongs in an (assumed date-ordered) list of
+ * entries: the position right after the last entry whose date is <=
+ * the given date. Ties resolve to "after" — so a new row sharing a
+ * date with an existing row is inserted below it, never above.
+ */
+function insertionIndexByDate(ordered: DriveLogEntry[], date: string): number {
+  for (let i = ordered.length - 1; i >= 0; i--) {
+    if (ordered[i].date <= date) return i + 1
+  }
+  return 0
+}
+
+/**
+ * Merges freshly-imported rows into the existing log in date order.
+ * The incoming batch is stable-sorted by date first (preserving the
+ * file's own row order for same-dated trips), then each row is
+ * inserted right after the last existing/already-inserted row sharing
+ * or preceding its date — so ties land below existing rows, and
+ * multiple new rows for the same date keep their file order among
+ * themselves. Only order changes; every row's own `distance` is
+ * untouched, so the odometer chain (derived from `baselineOdo` +
+ * order) simply recomputes for the new sequence — nothing about the
+ * validation rules changes.
+ */
+export function mergeEntriesByDate(existing: DriveLogEntry[], imported: DriveLogEntry[]): DriveLogEntry[] {
+  const incoming = [...imported].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+  const merged = [...existing]
+  for (const entry of incoming) {
+    merged.splice(insertionIndexByDate(merged, entry.date), 0, entry)
+  }
+  return merged
+}
 /** Serializes the log back into the required CSV shape, deriving
  *  Start ODO / Stop ODO from the baseline + each row's distance. */
 export function exportDriveLogCsv(log: DriveLog): string {

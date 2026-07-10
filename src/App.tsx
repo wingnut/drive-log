@@ -5,56 +5,99 @@ import Typography from '@mui/material/Typography'
 import Container from '@mui/material/Container'
 import Stack from '@mui/material/Stack'
 import Button from '@mui/material/Button'
+import IconButton from '@mui/material/IconButton'
+import Tooltip from '@mui/material/Tooltip'
 import Box from '@mui/material/Box'
 import Snackbar from '@mui/material/Snackbar'
 import Alert from '@mui/material/Alert'
 import DirectionsCarIcon from '@mui/icons-material/DirectionsCarFilledOutlined'
-import AddIcon from '@mui/icons-material/Add'
 import DownloadIcon from '@mui/icons-material/DownloadOutlined'
+import UndoIcon from '@mui/icons-material/UndoOutlined'
+import RedoIcon from '@mui/icons-material/RedoOutlined'
 
 import DriveLogTable from './components/DriveLogTable'
 import SummaryStats from './components/SummaryStats'
 import CsvImportButton from './components/CsvImportButton'
 import EntryDialog, { type EntrySavePayload } from './components/EntryDialog'
-import type { ComputedEntry, DriveLogEntry } from './types'
+import type { ComputedEntry, DriveLog, DriveLogEntry } from './types'
 import { computeChain, validateEntries } from './utils/chain'
-import { exportDriveLogCsv, downloadCsv, makeId } from './utils/csv'
+import { exportDriveLogCsv, downloadCsv, makeId, mergeEntriesByDate } from './utils/csv'
 import { loadLog, saveLog } from './utils/storage'
+import { useLogHistory } from './utils/history'
 
 /** Which entry the dialog is currently open for: inserting a brand new
- *  row at a given position, or editing an existing one by id. */
-type DialogState = { mode: 'add'; index: number } | { mode: 'edit'; id: string } | null
+ *  row at a given position (optionally prefilled with a neighboring
+ *  trip's date), or editing an existing one by id. */
+type DialogState =
+  | { mode: 'add'; index: number; anchorDate?: string }
+  | { mode: 'edit'; id: string }
+  | null
 
 export default function App() {
   const initialLog = useMemo(() => loadLog(), [])
-  const [baselineOdo, setBaselineOdo] = useState<number>(initialLog.baselineOdo)
-  const [entries, setEntries] = useState<DriveLogEntry[]>(initialLog.entries)
+  const { log, setLog, undo, redo, canUndo, canRedo } = useLogHistory(initialLog)
+  const { baselineOdo, entries } = log
   const [dialogState, setDialogState] = useState<DialogState>(null)
   const [snackbar, setSnackbar] = useState<{ message: string; severity: 'success' | 'warning' | 'error' } | null>(
     null,
   )
 
+  // Persist on every change to the log itself — undo/redo included, so
+  // reloading the page keeps whatever point in history you're at.
   useEffect(() => {
-    saveLog({ baselineOdo, entries })
-  }, [baselineOdo, entries])
+    saveLog(log)
+  }, [log])
+
+  // Ctrl/Cmd+Z to undo, Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y to redo.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const meta = e.ctrlKey || e.metaKey
+      if (!meta) return
+      const key = e.key.toLowerCase()
+      if (key === 'z' && e.shiftKey) {
+        e.preventDefault()
+        redo()
+      } else if (key === 'z') {
+        e.preventDefault()
+        undo()
+      } else if (key === 'y') {
+        e.preventDefault()
+        redo()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [undo, redo])
 
   // The single place Start ODO / Stop ODO get derived. Everything below
   // — the table, the summary, validation, the dialog's starting point —
   // reads from this instead of trusting any stored odometer value.
   const computed = useMemo(() => computeChain(baselineOdo, entries), [baselineOdo, entries])
   const issues = useMemo(() => validateEntries(computed), [computed])
-  const errorCount = useMemo(
-    () => Array.from(issues.values()).flat().filter((i) => i.severity === 'error').length,
-    [issues],
-  )
 
-  const handleAppend = () => setDialogState({ mode: 'add', index: entries.length })
-  const handleInsertAt = (index: number) => setDialogState({ mode: 'add', index })
+  const handleInsertAt = (index: number, anchorDate?: string) => setDialogState({ mode: 'add', index, anchorDate })
   const handleEditClick = (entry: ComputedEntry) => setDialogState({ mode: 'edit', id: entry.id })
   const handleDialogClose = () => setDialogState(null)
 
   const handleDelete = (id: string) => {
-    setEntries((prev) => prev.filter((e) => e.id !== id))
+    setLog((prev) => ({ ...prev, entries: prev.entries.filter((e) => e.id !== id) }))
+  }
+
+  /** Reorders `entries` so the dragged row (currently at `from`) ends
+   *  up immediately before the row currently at `to` — this rule holds
+   *  regardless of drag direction, so dropping onto a row always reads
+   *  as "put it right here, above this one". Only order changes; every
+   *  row keeps its own recorded distance, so the odometer chain (and
+   *  all its validation) simply recomputes for the new sequence. */
+  const handleReorder = (from: number, to: number) => {
+    if (from === to) return
+    setLog((prev) => {
+      const arr = [...prev.entries]
+      const [moved] = arr.splice(from, 1)
+      const insertIndex = from < to ? to - 1 : to
+      arr.splice(insertIndex, 0, moved)
+      return { ...prev, entries: arr }
+    })
   }
 
   const handleSave = (payload: EntrySavePayload) => {
@@ -66,48 +109,54 @@ export default function App() {
         distance: payload.distance,
         reason: payload.reason,
       }
-      setEntries((prev) => [
-        ...prev.slice(0, dialogState.index),
-        newEntry,
-        ...prev.slice(dialogState.index),
-      ])
-      if (dialogState.index === 0 && payload.startOdoOverride !== undefined) {
-        setBaselineOdo(payload.startOdoOverride)
-      }
+      setLog((prev) => ({
+        baselineOdo:
+          dialogState.index === 0 && payload.startOdoOverride !== undefined
+            ? payload.startOdoOverride
+            : prev.baselineOdo,
+        entries: [...prev.entries.slice(0, dialogState.index), newEntry, ...prev.entries.slice(dialogState.index)],
+      }))
     } else {
-      setEntries((prev) =>
-        prev.map((e) =>
+      const idx = entries.findIndex((e) => e.id === dialogState.id)
+      setLog((prev) => ({
+        baselineOdo:
+          idx === 0 && payload.startOdoOverride !== undefined ? payload.startOdoOverride : prev.baselineOdo,
+        entries: prev.entries.map((e) =>
           e.id === dialogState.id
             ? { ...e, date: payload.date, distance: payload.distance, reason: payload.reason }
             : e,
         ),
-      )
-      const idx = entries.findIndex((e) => e.id === dialogState.id)
-      if (idx === 0 && payload.startOdoOverride !== undefined) {
-        setBaselineOdo(payload.startOdoOverride)
-      }
+      }))
     }
   }
 
   const handleImported = (imported: DriveLogEntry[], importedBaseline: number, warnings: string[]) => {
-    if (entries.length === 0) {
-      setBaselineOdo(importedBaseline)
-      setEntries(imported)
-    } else {
-      // Log already has rows: the imported trips are appended, and the
-      // chain simply continues from the current last Stop ODO — the
-      // CSV's own baseline is only meaningful for an empty log.
-      setEntries((prev) => [...prev, ...imported])
-    }
+    setLog((prev): DriveLog => {
+      if (prev.entries.length === 0) {
+        // Nothing to merge with yet — the CSV's own baseline becomes
+        // the log's, and its rows still go through the same date-order
+        // merge (against an empty list) so ties/ordering behave
+        // identically to merging into a non-empty log.
+        return { baselineOdo: importedBaseline, entries: mergeEntriesByDate([], imported) }
+      }
+      // Log already has rows: keep the existing baseline (the CSV's is
+      // only meaningful for a from-scratch import) and weave the new
+      // trips into the existing ones by date — a new row lands below
+      // any existing row that shares its date, never above.
+      return { ...prev, entries: mergeEntriesByDate(prev.entries, imported) }
+    })
     if (warnings.length > 0) {
       setSnackbar({
-        message: `Importerade ${imported.length} resor med ${warnings.length} varning(ar): ${warnings[0]}${
+        message: `Importerade och sammanfogade ${imported.length} resor med ${warnings.length} varning(ar): ${warnings[0]}${
           warnings.length > 1 ? ` (+${warnings.length - 1} till)` : ''
         }`,
         severity: 'warning',
       })
     } else {
-      setSnackbar({ message: `Importerade ${imported.length} resor.`, severity: 'success' })
+      setSnackbar({
+        message: `Importerade och sammanfogade ${imported.length} resor efter datum.`,
+        severity: 'success',
+      })
     }
   }
 
@@ -122,10 +171,18 @@ export default function App() {
   let dialogStartOdo = 0
   let dialogIsFirst = false
   let dialogInitial: DriveLogEntry | undefined
+  // Default date for a brand new row: the date of the row whose cell
+  // the insert control was hovered in (passed through as anchorDate),
+  // so it's obvious which date the new row will default to and where
+  // it'll land. Falls back to a neighboring row, then to nothing
+  // (today) only for a genuinely empty log.
+  let dialogDefaultDate: string | undefined
 
   if (dialogState?.mode === 'add') {
     dialogIsFirst = dialogState.index === 0
     dialogStartOdo = dialogState.index === 0 ? baselineOdo : computed[dialogState.index - 1].stopOdo
+    dialogDefaultDate =
+      dialogState.anchorDate ?? entries[dialogState.index - 1]?.date ?? entries[dialogState.index]?.date
   } else if (dialogState?.mode === 'edit') {
     const idx = computed.findIndex((e) => e.id === dialogState.id)
     if (idx >= 0) {
@@ -143,6 +200,22 @@ export default function App() {
           <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
             Körjournal – Tjänstebil
           </Typography>
+          <Stack direction="row" spacing={0.5} sx={{ mr: 2 }}>
+            <Tooltip title="Ångra (Ctrl+Z)">
+              <span>
+                <IconButton color="inherit" size="small" onClick={undo} disabled={!canUndo}>
+                  <UndoIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Tooltip title="Gör om (Ctrl+Shift+Z)">
+              <span>
+                <IconButton color="inherit" size="small" onClick={redo} disabled={!canRedo}>
+                  <RedoIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Stack>
           <Typography variant="body2" sx={{ opacity: 0.75 }}>
             Underlag för Skatteverket
           </Typography>
@@ -154,21 +227,28 @@ export default function App() {
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ sm: 'center' }}>
             <Typography variant="body2" color="text.secondary" maxWidth={560}>
               Registrera varje tjänsteresa med datum, mätarställning och anledning. Start ODO
-              härleds alltid från föregående resas Stop ODO — infoga en resa var som helst i
-              listan så flyttas alla senare resor automatiskt, utan att deras distanser ändras.
+              härleds alltid från föregående resas Stop ODO — infoga eller dra om resor var som
+              helst i listan så flyttas alla senare resor automatiskt, utan att deras distanser
+              ändras.{' '}
+              <Typography component="span" variant="body2" fontWeight="bold" color="text.primary">
+                Alla resor antas vara tur-och-retur med start från kontoret.
+              </Typography>
             </Typography>
             <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
               <CsvImportButton onImported={handleImported} />
-              <Button variant="outlined" color="inherit" startIcon={<DownloadIcon />} onClick={handleExport} disabled={entries.length === 0}>
+              <Button
+                variant="outlined"
+                color="inherit"
+                startIcon={<DownloadIcon />}
+                onClick={handleExport}
+                disabled={entries.length === 0}
+              >
                 Exportera CSV
-              </Button>
-              <Button variant="contained" startIcon={<AddIcon />} onClick={handleAppend}>
-                Lägg till resa
               </Button>
             </Stack>
           </Stack>
 
-          <SummaryStats entries={computed} errorCount={errorCount} />
+          <SummaryStats entries={computed} />
 
           <DriveLogTable
             entries={computed}
@@ -176,6 +256,7 @@ export default function App() {
             onEdit={handleEditClick}
             onDelete={handleDelete}
             onInsertAt={handleInsertAt}
+            onReorder={handleReorder}
           />
         </Stack>
       </Container>
@@ -187,6 +268,8 @@ export default function App() {
         initial={dialogInitial}
         startOdo={dialogStartOdo}
         isFirst={dialogIsFirst}
+        defaultDate={dialogDefaultDate}
+        existingEntries={entries}
       />
 
       <Snackbar
