@@ -10,7 +10,6 @@ import Typography from '@mui/material/Typography'
 import InputAdornment from '@mui/material/InputAdornment'
 import ReasonAutocomplete from './ReasonAutocomplete'
 import type { DriveLogEntry } from '../types'
-import { COMMON_REASONS } from '../types'
 
 export interface EntrySavePayload {
   date: string
@@ -84,13 +83,12 @@ export default function EntryDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initial, startOdo, defaultDate])
 
-  // Reason dropdown: every reason already used in the log, plus the
-  // built-in seed list for a log that's still empty/sparse — deduped
-  // and alphabetised. Grows on its own as new reasons get saved,
-  // nothing extra to persist.
+  // Reason dropdown: builds up purely from what's actually in the log —
+  // starts empty and grows on its own as reasons get typed, imported,
+  // or merged in, deduped and alphabetised. No seed list.
   const reasonOptions = useMemo(() => {
     const used = existingEntries.map((e) => e.reason.trim()).filter(Boolean)
-    return Array.from(new Set([...COMMON_REASONS, ...used])).sort((a, b) => a.localeCompare(b, 'sv'))
+    return Array.from(new Set(used)).sort((a, b) => a.localeCompare(b, 'sv'))
   }, [existingEntries])
 
   const effectiveStartOdo = isFirst ? Number(startOdoStr) : startOdo

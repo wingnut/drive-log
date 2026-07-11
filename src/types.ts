@@ -54,16 +54,3 @@ export const REQUIRED_CSV_COLUMNS = [
   'Stop ODO',
   'Reason',
 ] as const
-
-/** Commonly used Skatteverket-style business trip reasons. Presented
- * as a dropdown, but the field always stays free-text/editable. */
-export const COMMON_REASONS = [
-  'Kundbesök',
-  'Möte hos leverantör',
-  'Tjänsteärende',
-  'Konferens/utbildning',
-  'Transport av material/utrustning',
-  'Besök på kontor/filial',
-  'Upphämtning/leverans',
-  'Site-besök',
-]
