@@ -11,6 +11,7 @@ type HistoryAction =
   | { type: 'SET'; payload: DriveLog }
   | { type: 'UNDO' }
   | { type: 'REDO' }
+  | { type: 'RESET'; payload: DriveLog }
 
 function historyReducer(state: HistoryState, action: HistoryAction): HistoryState {
   switch (action.type) {
@@ -30,6 +31,11 @@ function historyReducer(state: HistoryState, action: HistoryAction): HistoryStat
       const next = state.future[0]
       return { past: [...state.past, state.present], present: next, future: state.future.slice(1) }
     }
+    case 'RESET':
+      // Deliberately wipes past *and* future — unlike SET, this isn't
+      // itself an undoable step. "Rensa allt" means starting over, not
+      // "one more history entry you could undo back out of".
+      return { past: [], present: action.payload, future: [] }
     default:
       return state
   }
@@ -58,6 +64,7 @@ export function useLogHistory(initial: DriveLog) {
 
   const undo = useCallback(() => dispatch({ type: 'UNDO' }), [])
   const redo = useCallback(() => dispatch({ type: 'REDO' }), [])
+  const resetTo = useCallback((payload: DriveLog) => dispatch({ type: 'RESET', payload }), [])
 
   return useMemo(
     () => ({
@@ -65,9 +72,10 @@ export function useLogHistory(initial: DriveLog) {
       setLog,
       undo,
       redo,
+      resetTo,
       canUndo: state.past.length > 0,
       canRedo: state.future.length > 0,
     }),
-    [state, setLog, undo, redo],
+    [state, setLog, undo, redo, resetTo],
   )
 }

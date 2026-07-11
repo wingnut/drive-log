@@ -10,19 +10,26 @@ import Tooltip from '@mui/material/Tooltip'
 import Box from '@mui/material/Box'
 import Snackbar from '@mui/material/Snackbar'
 import Alert from '@mui/material/Alert'
+import Dialog from '@mui/material/Dialog'
+import DialogTitle from '@mui/material/DialogTitle'
+import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
+import DialogActions from '@mui/material/DialogActions'
 import DirectionsCarIcon from '@mui/icons-material/DirectionsCarFilledOutlined'
 import DownloadIcon from '@mui/icons-material/DownloadOutlined'
 import UndoIcon from '@mui/icons-material/UndoOutlined'
 import RedoIcon from '@mui/icons-material/RedoOutlined'
+import DeleteSweepOutlinedIcon from '@mui/icons-material/DeleteSweepOutlined'
 
 import DriveLogTable from './components/DriveLogTable'
 import SummaryStats from './components/SummaryStats'
 import CsvImportButton from './components/CsvImportButton'
 import EntryDialog, { type EntrySavePayload } from './components/EntryDialog'
+import ExportCsvDialog from './components/ExportCsvDialog'
 import type { ComputedEntry, DriveLog, DriveLogEntry } from './types'
 import { computeChain, validateEntries } from './utils/chain'
 import { exportDriveLogCsv, downloadCsv, makeId, mergeEntriesByDate } from './utils/csv'
-import { loadLog, saveLog } from './utils/storage'
+import { loadLog, saveLog, clearLog, EMPTY_LOG } from './utils/storage'
 import { useLogHistory } from './utils/history'
 
 /** Which entry the dialog is currently open for: inserting a brand new
@@ -35,9 +42,11 @@ type DialogState =
 
 export default function App() {
   const initialLog = useMemo(() => loadLog(), [])
-  const { log, setLog, undo, redo, canUndo, canRedo } = useLogHistory(initialLog)
+  const { log, setLog, undo, redo, resetTo, canUndo, canRedo } = useLogHistory(initialLog)
   const { baselineOdo, entries } = log
   const [dialogState, setDialogState] = useState<DialogState>(null)
+  const [exportDialogOpen, setExportDialogOpen] = useState(false)
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
   const [snackbar, setSnackbar] = useState<{ message: string; severity: 'success' | 'warning' | 'error' } | null>(
     null,
   )
@@ -160,9 +169,23 @@ export default function App() {
     }
   }
 
-  const handleExport = () => {
+  const handleDownloadFallback = (filename: string) => {
     const csv = exportDriveLogCsv({ baselineOdo, entries })
-    downloadCsv(`korjournal-${new Date().toISOString().slice(0, 10)}.csv`, csv)
+    downloadCsv(filename, csv)
+  }
+
+  const handleExported = ({ filename, folderName }: { filename: string; folderName?: string }) => {
+    setSnackbar({
+      message: folderName ? `Sparade ${filename} i mappen "${folderName}".` : `${filename} laddades ner.`,
+      severity: 'success',
+    })
+  }
+
+  const handleClearAll = () => {
+    resetTo(EMPTY_LOG)
+    clearLog()
+    setClearConfirmOpen(false)
+    setSnackbar({ message: 'Körjournalen har rensats.', severity: 'success' })
   }
 
   // Figure out what the dialog should show: the Start ODO this row has
@@ -216,9 +239,14 @@ export default function App() {
               </span>
             </Tooltip>
           </Stack>
-          <Typography variant="body2" sx={{ opacity: 0.75 }}>
+          <Typography variant="body2" sx={{ opacity: 0.75, mr: 2 }}>
             Underlag för Skatteverket
           </Typography>
+          <Tooltip title="Rensa allt — tar bort alla resor och historik">
+            <IconButton color="inherit" size="small" onClick={() => setClearConfirmOpen(true)}>
+              <DeleteSweepOutlinedIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
         </Toolbar>
       </AppBar>
 
@@ -240,7 +268,7 @@ export default function App() {
                 variant="outlined"
                 color="inherit"
                 startIcon={<DownloadIcon />}
-                onClick={handleExport}
+                onClick={() => setExportDialogOpen(true)}
                 disabled={entries.length === 0}
               >
                 Exportera CSV
@@ -271,6 +299,32 @@ export default function App() {
         defaultDate={dialogDefaultDate}
         existingEntries={entries}
       />
+
+      <ExportCsvDialog
+        open={exportDialogOpen}
+        onClose={() => setExportDialogOpen(false)}
+        generateCsv={() => exportDriveLogCsv({ baselineOdo, entries })}
+        onDownloadFallback={handleDownloadFallback}
+        onExported={handleExported}
+      />
+
+      <Dialog open={clearConfirmOpen} onClose={() => setClearConfirmOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Rensa hela körjournalen?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Alla resor, den registrerade mätarställningen och hela historiken för ångra/gör om tas bort. Det
+            här går inte att ångra.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setClearConfirmOpen(false)} color="inherit">
+            Avbryt
+          </Button>
+          <Button onClick={handleClearAll} variant="contained" color="error">
+            Rensa allt
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Snackbar
         open={snackbar !== null}

@@ -19,8 +19,9 @@ export interface DriveLogEntry {
   /** Distance travelled (km) on this trip. The source of truth —
    *  Start ODO / Stop ODO are derived from this plus the log baseline. */
   distance: number
-  /** Free-text business reason for the trip (from a dropdown of
-   *  common reasons, but editable). */
+  /** Free-text business reason for the trip. The UI offers a dropdown
+   *  built from reasons already used elsewhere in the log, but this
+   *  field itself is always plain, editable text. */
   reason: string
 }
 
