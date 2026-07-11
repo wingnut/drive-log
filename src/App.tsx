@@ -258,9 +258,6 @@ export default function App() {
               härleds alltid från föregående resas Stop ODO — infoga eller dra om resor var som
               helst i listan så flyttas alla senare resor automatiskt, utan att deras distanser
               ändras.{' '}
-              <Typography component="span" variant="body2" fontWeight="bold" color="text.primary">
-                Alla resor antas vara tur-och-retur med start från kontoret.
-              </Typography>
             </Typography>
             <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
               <CsvImportButton onImported={handleImported} />
