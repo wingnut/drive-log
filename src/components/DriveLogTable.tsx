@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DragEvent } from 'react'
 import Table from '@mui/material/Table'
 import TableBody from '@mui/material/TableBody'
@@ -122,6 +122,36 @@ export default function DriveLogTable({ entries, issues, onEdit, onDelete, onIns
   const [overIndex, setOverIndex] = useState<number | null>(null)
   const [menuState, setMenuState] = useState<{ anchorEl: HTMLElement; entry: ComputedEntry } | null>(null)
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({})
+
+  /** Any structural change to the row list — inserting, deleting,
+   *  merging, or a completed drag-and-drop reorder — can move rows on
+   *  screen (or move their underlying DOM nodes, for a real reorder)
+   *  without the browser ever seeing a fresh pointer event over the
+   *  new layout. Browsers only recompute `:hover` in response to an
+   *  actual mouse event, not just because an element slid out from
+   *  under a stationary cursor — so a hover-only control (drag handle,
+   *  "…" menu) can keep showing, or fail to show, until the user
+   *  jiggles the mouse themselves. Toggling `pointer-events` off and
+   *  back on for a frame forces the browser to redo hit-testing
+   *  immediately, so this runs automatically whenever the rows change. */
+  const refreshHoverState = useCallback(() => {
+    document.body.style.pointerEvents = 'none'
+    requestAnimationFrame(() => {
+      // Always clear back to the default rather than restoring a
+      // captured "previous" value — if this ever fires twice in close
+      // succession (e.g. React StrictMode's double-invoked effects in
+      // dev), the second call's "previous" would read as 'none' from
+      // the first call still being in flight, and restoring that would
+      // leave pointer-events stuck off permanently. Nothing else in
+      // this app sets inline pointer-events on <body>, so clearing it
+      // unconditionally is always correct.
+      document.body.style.pointerEvents = ''
+    })
+  }, [])
+
+  useEffect(() => {
+    refreshHoverState()
+  }, [entries, refreshHoverState])
 
   if (entries.length === 0) {
     return (
