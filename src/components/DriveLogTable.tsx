@@ -236,7 +236,10 @@ export default function DriveLogTable({ entries, issues, onEdit, onDelete, onIns
             const groupBg = groupParities[index] === 1 ? 'rgba(31,58,82,0.05)' : 'transparent'
             // Cells within a same-date group share this border override
             // so the divider only shows where the date actually changes.
-            const groupBorderSx = isLastInGroup ? undefined : { borderBottom: 'none' }
+            // Always a plain object (never undefined) — MUI's `sx` type
+            // only accepts undefined/boolean as *array* elements, not as
+            // a bare value, and this gets used both ways below.
+            const groupBorderSx = isLastInGroup ? {} : { borderBottom: 'none' }
 
             return (
               <TableRow
